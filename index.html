@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#1a1a18">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="文字起こし">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>現場文字起こし</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #f5f5f3;
+    --surface: #ffffff;
+    --border: #e0dfd8;
+    --border-light: #f1efe8;
+    --text: #1a1a18;
+    --text-mid: #5f5e5a;
+    --text-dim: #888780;
+    --text-faint: #b4b2a9;
+    --accent: #185fa5;
+    --green-bg: #eaf3de;
+    --green-text: #3b6d11;
+    --amber-bg: #faeeda;
+    --amber-text: #854f0b;
+    --red-text: #a32d2d;
+    --red-border: #f09595;
+    --red-bg: #fcebeb;
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  html, body {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans JP', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ── Header ── */
+  header {
+    background: var(--surface);
+    border-bottom: 0.5px solid var(--border);
+    padding: calc(12px + var(--safe-top)) 16px 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-shrink: 0;
+    z-index: 10;
+  }
+
+  .header-left { display: flex; align-items: center; gap: 10px; }
+
+  .app-title { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+
+  .status-badge {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 11px; font-weight: 600;
+    padding: 3px 9px; border-radius: 20px;
+  }
+  .status-badge.idle   { background: #f1efe8; color: var(--text-mid); }
+  .status-badge.rec    { background: var(--green-bg); color: var(--green-text); }
+  .status-badge.paused { background: var(--amber-bg); color: var(--amber-text); }
+
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+  .dot.pulse { animation: pulse 1.2s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.25} }
+
+  select {
+    height: 32px; border: 0.5px solid #c8c7c0; border-radius: 8px;
+    padding: 0 8px; font-size: 13px; background: var(--surface);
+    color: var(--text); -webkit-appearance: none; appearance: none;
+    padding-right: 22px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23888'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 7px center;
+  }
+
+  /* ── Main scroll area ── */
+  main {
+    flex: 1;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 14px 14px calc(14px + var(--safe-bottom));
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  /* ── Controls ── */
+  .controls-row {
+    display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+  }
+
+  .timer {
+    font-size: 13px; color: var(--text-dim);
+    font-variant-numeric: tabular-nums; letter-spacing: 0.02em;
+    min-width: 62px;
+  }
+
+  button {
+    display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+    height: 40px; padding: 0 16px;
+    border: 0.5px solid #c8c7c0; border-radius: 10px;
+    font-size: 13px; font-weight: 500;
+    cursor: pointer; background: var(--surface); color: var(--text);
+    transition: background 0.12s, border-color 0.12s;
+    white-space: nowrap; -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+  button:active { opacity: 0.7; transform: scale(0.97); }
+  button:disabled { opacity: 0.35; cursor: default; transform: none; }
+
+  button.primary { background: var(--text); color: #fff; border-color: var(--text); font-size: 14px; height: 44px; }
+  button.danger  { color: var(--red-text); border-color: var(--red-border); }
+  button.sm      { height: 30px; padding: 0 10px; font-size: 12px; }
+
+  /* ── Info bar ── */
+  .info-bar {
+    display: flex; gap: 14px; font-size: 12px; color: var(--text-dim);
+    flex-wrap: wrap;
+  }
+  .info-bar strong { color: var(--text-mid); }
+
+  /* ── Dictionary ── */
+  .dict-panel {
+    background: var(--surface);
+    border: 0.5px solid var(--border);
+    border-radius: 12px; overflow: hidden;
+  }
+  .dict-toggle {
+    width: 100%; text-align: left; height: auto;
+    padding: 11px 14px; font-size: 13px; font-weight: 500;
+    color: var(--text-mid); background: #fafaf8;
+    border: none; border-radius: 0;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .dict-toggle:active { opacity: 0.7; transform: none; }
+  .dict-arrow { font-size: 10px; color: var(--text-dim); }
+  .dict-content { display: none; padding: 10px 14px; }
+  .dict-content.open { display: block; }
+  .dict-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+    gap: 3px 12px;
+  }
+  .dict-item { font-size: 12px; color: var(--text-mid); padding: 3px 0; border-bottom: 0.5px solid var(--border-light); }
+  .dict-item span { color: var(--accent); font-weight: 500; }
+
+  /* ── Transcript panel ── */
+  .panel {
+    background: var(--surface);
+    border: 0.5px solid var(--border);
+    border-radius: 12px; overflow: hidden;
+    display: flex; flex-direction: column;
+    flex: 1; min-height: 220px;
+  }
+
+  .panel-header {
+    padding: 10px 14px; border-bottom: 0.5px solid var(--border);
+    background: #fafaf8; display: flex; align-items: center;
+    justify-content: space-between; flex-shrink: 0;
+  }
+  .panel-header span {
+    font-size: 11px; font-weight: 600; color: var(--text-dim);
+    text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  .panel-actions { display: flex; gap: 6px; }
+
+  .transcript-box {
+    flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch;
+    padding: 14px; font-size: 15px; line-height: 1.85;
+    color: var(--text); word-break: break-word;
+  }
+  .transcript-box:empty::after {
+    content: "録音を開始すると、ここに文字起こしが表示されます";
+    color: var(--text-faint); font-size: 14px;
+  }
+
+  .segment { padding-bottom: 12px; margin-bottom: 12px; border-bottom: 0.5px solid var(--border-light); }
+  .segment:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+  .segment-meta { font-size: 11px; color: var(--text-faint); margin-bottom: 4px; }
+  .segment-text { font-size: 15px; line-height: 1.85; white-space: pre-wrap; }
+
+  .interim-text { color: var(--text-faint); font-style: italic; }
+
+  /* ── Error toast ── */
+  .error-toast {
+    background: var(--red-bg); border: 0.5px solid var(--red-border);
+    border-radius: 10px; padding: 10px 14px;
+    font-size: 13px; color: var(--red-text); display: none;
+    flex-shrink: 0;
+  }
+  .error-toast.show { display: block; }
+
+  /* ── Install banner ── */
+  .install-banner {
+    background: #e6f1fb; border: 0.5px solid #b5d4f4;
+    border-radius: 10px; padding: 10px 14px;
+    font-size: 13px; color: var(--accent);
+    display: none; align-items: center; justify-content: space-between; gap: 10px;
+    flex-shrink: 0;
+  }
+  .install-banner.show { display: flex; }
+  .install-banner button { height: 32px; padding: 0 12px; font-size: 12px; background: var(--accent); color: #fff; border-color: var(--accent); border-radius: 8px; }
+
+  /* ── Wake Lock indicator ── */
+  .wakelock-badge {
+    font-size: 11px; color: var(--text-dim);
+    display: flex; align-items: center; gap: 4px;
+  }
+  .wakelock-badge.active { color: var(--green-text); }
+
+  @media (min-width: 640px) {
+    header { padding-left: 24px; padding-right: 24px; }
+    main { padding-left: 24px; padding-right: 24px; max-width: 860px; margin: 0 auto; width: 100%; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-left">
+    <div class="app-title">現場文字起こし</div>
+    <div class="status-badge idle" id="statusBadge">
+      <div class="dot" id="statusDot"></div>
+      <span id="statusText">待機中</span>
+    </div>
+  </div>
+  <select id="langSelect" title="認識言語">
+    <option value="ja-JP">日本語</option>
+    <option value="en-US">English</option>
+    <option value="ja-JP" data-bilingual="1">日英混在</option>
+  </select>
+</header>
+
+<main>
+  <div class="error-toast" id="errorToast"></div>
+
+  <div class="install-banner" id="installBanner">
+    <span>📲 ホーム画面に追加してアプリとして使えます</span>
+    <button onclick="installPWA()">追加</button>
+  </div>
+
+  <div class="controls-row">
+    <button class="primary" id="btnStart" onclick="startRecording()">● 録音開始</button>
+    <button id="btnPause" onclick="togglePause()" disabled>一時停止</button>
+    <button class="danger" id="btnStop" onclick="stopRecording()" disabled>■ 停止</button>
+    <div class="timer" id="timer">00:00:00</div>
+    <div style="flex:1"></div>
+    <button class="sm" onclick="copyAll()">コピー</button>
+    <button class="sm" onclick="exportText()">保存</button>
+    <button class="sm danger" onclick="clearAll()">クリア</button>
+  </div>
+
+  <div class="info-bar">
+    <span>セグメント: <strong id="segCount">0</strong></span>
+    <span>文字数: <strong id="charCount">0</strong></span>
+    <span class="wakelock-badge" id="wakeLockBadge">画面: 通常</span>
+  </div>
+
+  <div class="dict-panel">
+    <button class="dict-toggle" onclick="toggleDict()">
+      <span>現場用語辞書 <span id="dictCount" style="color:var(--accent);font-weight:600"></span></span>
+      <span class="dict-arrow" id="dictArrow">▼</span>
+    </button>
+    <div class="dict-content" id="dictContent">
+      <div class="dict-grid" id="dictGrid"></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-header">
+      <span>文字起こし</span>
+      <div class="panel-actions">
+        <button class="sm" onclick="copyAll()">コピー</button>
+        <button class="sm" onclick="exportText()">保存</button>
+      </div>
+    </div>
+    <div class="transcript-box" id="transcriptBox"></div>
+  </div>
+</main>
+
+<script>
+// ── 現場用語辞書 ──────────────────────────────────
+const PLANT_DICT = [
+  ["ご安全に","Go-Anzen-Ni"],
+  ["災害防止協議会","Safety Council"],
+  ["定期修理工事","SDM"],
+  ["着工札","Work permit"],
+  ["作業標準書","Work procedure"],
+  ["朝礼","Morning meeting"],
+  ["STO","Safety Time Out"],
+  ["ユニック車","Boom truck"],
+  ["棒心","Foreman"],
+  ["労災","Incident"],
+  ["入槽管理板","Tank Entry Management Board"],
+  ["施工","Maintenance"],
+  ["鹿島石油","KOC"],
+  ["縁切り","Isolation"],
+  ["仕切り板","Blind"],
+  ["活線","Live / Energized"],
+  ["安全衛生部長","General Manager, Safety and Health"],
+];
+
+// ── 状態 ───────────────────────────────────────────
+let recognition = null;
+let isRecording  = false;
+let isPaused     = false;
+let timerInterval = null;
+let elapsed = 0;
+let segments = [];
+let finalBuffer = "";
+let wakeLock = null;
+let deferredInstallPrompt = null;
+
+// ── PWAインストール ────────────────────────────────
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredInstallPrompt = e;
+  document.getElementById('installBanner').classList.add('show');
+});
+
+window.addEventListener('appinstalled', () => {
+  document.getElementById('installBanner').classList.remove('show');
+});
+
+function installPWA() {
+  if (!deferredInstallPrompt) return;
+  deferredInstallPrompt.prompt();
+  deferredInstallPrompt.userChoice.then(() => {
+    deferredInstallPrompt = null;
+    document.getElementById('installBanner').classList.remove('show');
+  });
+}
+
+// ── Wake Lock（画面消灯防止）────────────────────────
+async function requestWakeLock() {
+  if (!('wakeLock' in navigator)) return;
+  try {
+    wakeLock = await navigator.wakeLock.request('screen');
+    updateWakeLockBadge(true);
+    wakeLock.addEventListener('release', () => updateWakeLockBadge(false));
+  } catch (_) {}
+}
+
+async function releaseWakeLock() {
+  if (wakeLock) { await wakeLock.release().catch(() => {}); wakeLock = null; }
+  updateWakeLockBadge(false);
+}
+
+document.addEventListener('visibilitychange', async () => {
+  if (document.visibilityState === 'visible' && isRecording && !isPaused) {
+    await requestWakeLock();
+  }
+});
+
+function updateWakeLockBadge(active) {
+  const b = document.getElementById('wakeLockBadge');
+  b.textContent = active ? '🔆 画面: 常時オン' : '画面: 通常';
+  b.className = 'wakelock-badge' + (active ? ' active' : '');
+}
+
+// ── Service Worker 登録 ──────────────────────────
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('service-worker.js').catch(() => {});
+  });
+}
+
+// ── 辞書 ──────────────────────────────────────────
+function initDict() {
+  document.getElementById('dictCount').textContent = `(${PLANT_DICT.length}語)`;
+  document.getElementById('dictGrid').innerHTML = PLANT_DICT
+    .map(([jp,en]) => `<div class="dict-item">${esc(jp)} → <span>${esc(en)}</span></div>`)
+    .join('');
+}
+
+function toggleDict() {
+  const c = document.getElementById('dictContent');
+  const open = c.classList.toggle('open');
+  document.getElementById('dictArrow').textContent = open ? '▲' : '▼';
+}
+
+// ── ステータス ─────────────────────────────────────
+function setStatus(state) {
+  const badge = document.getElementById('statusBadge');
+  const dot   = document.getElementById('statusDot');
+  badge.className = 'status-badge ' + state;
+  dot.className   = 'dot' + (state === 'rec' ? ' pulse' : '');
+  document.getElementById('statusText').textContent =
+    { idle:'待機中', rec:'録音中', paused:'一時停止' }[state] || '待機中';
+}
+
+// ── UI補助 ────────────────────────────────────────
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function showError(msg) {
+  const t = document.getElementById('errorToast');
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 5000);
+}
+
+function showToast(msg) {
+  const t = document.createElement('div');
+  t.style.cssText = 'position:fixed;bottom:calc(20px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);background:#1a1a18;color:#fff;padding:10px 18px;border-radius:10px;font-size:13px;z-index:9999;opacity:0;transition:opacity 0.2s;white-space:nowrap';
+  t.textContent = msg;
+  document.body.appendChild(t);
+  requestAnimationFrame(() => t.style.opacity = 1);
+  setTimeout(() => { t.style.opacity = 0; setTimeout(() => t.remove(), 200); }, 1800);
+}
+
+function updateStats() {
+  document.getElementById('segCount').textContent = segments.length;
+  document.getElementById('charCount').textContent = segments.reduce((n,s) => n + s.text.length, 0);
+}
+
+// ── レンダリング ───────────────────────────────────
+function renderAll(interimText) {
+  const box = document.getElementById('transcriptBox');
+  let html = segments.map((s, i) =>
+    `<div class="segment">
+      <div class="segment-meta">${esc(s.time)} — セグメント ${i+1}</div>
+      <div class="segment-text">${esc(s.text)}</div>
+    </div>`
+  ).join('');
+  if (interimText) html += `<div class="interim-text">${esc(interimText)}</div>`;
+  box.innerHTML = html;
+  box.scrollTop = box.scrollHeight;
+  updateStats();
+}
+
+function flushBuffer() {
+  const text = finalBuffer.trim();
+  finalBuffer = '';
+  if (!text) return;
+  segments.push({ text, time: new Date().toTimeString().slice(0,8) });
+  renderAll('');
+}
+
+// ── タイマー ───────────────────────────────────────
+function startTimer() {
+  timerInterval = setInterval(() => {
+    if (!isPaused) {
+      elapsed++;
+      const h = String(Math.floor(elapsed/3600)).padStart(2,'0');
+      const m = String(Math.floor((elapsed%3600)/60)).padStart(2,'0');
+      const s = String(elapsed%60).padStart(2,'0');
+      document.getElementById('timer').textContent = `${h}:${m}:${s}`;
+    }
+  }, 1000);
+}
+
+// ── 音声認識 ───────────────────────────────────────
+function setupRecognition() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { showError('音声認識に対応していません。Chrome を使用してください。'); return null; }
+
+  const r = new SR();
+  r.lang = document.getElementById('langSelect').value;
+  r.continuous = true;
+  r.interimResults = true;
+  r.maxAlternatives = 1;
+
+  r.onresult = (e) => {
+    if (isPaused) return;
+    let interim = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      if (e.results[i].isFinal) finalBuffer += e.results[i][0].transcript;
+      else interim += e.results[i][0].transcript;
+    }
+    if (finalBuffer.length >= 150) flushBuffer();
+    renderAll(finalBuffer + interim);
+  };
+
+  r.onend = () => {
+    if (isRecording && !isPaused) {
+      setTimeout(() => { try { r.start(); } catch (_) {} }, 200);
+    }
+  };
+
+  r.onerror = (e) => {
+    if (['no-speech','aborted'].includes(e.error)) return;
+    showError('音声認識エラー: ' + e.error);
+  };
+
+  return r;
+}
+
+// ── 録音操作 ───────────────────────────────────────
+async function startRecording() {
+  recognition = setupRecognition();
+  if (!recognition) return;
+
+  isRecording = true; isPaused = false;
+  elapsed = 0; finalBuffer = '';
+
+  try { recognition.start(); } catch (_) {}
+  setStatus('rec');
+  startTimer();
+  await requestWakeLock();
+
+  document.getElementById('btnStart').disabled = true;
+  document.getElementById('btnPause').disabled = false;
+  document.getElementById('btnStop').disabled  = false;
+}
+
+function togglePause() {
+  if (!isRecording) return;
+  isPaused = !isPaused;
+  if (isPaused) {
+    flushBuffer();
+    try { recognition.stop(); } catch (_) {}
+    setStatus('paused');
+    releaseWakeLock();
+    document.getElementById('btnPause').textContent = '再開';
+  } else {
+    try { recognition.start(); } catch (_) {}
+    setStatus('rec');
+    requestWakeLock();
+    document.getElementById('btnPause').textContent = '一時停止';
+  }
+}
+
+async function stopRecording() {
+  isRecording = false; isPaused = false;
+  flushBuffer();
+  if (recognition) { try { recognition.stop(); } catch (_) {} recognition = null; }
+  clearInterval(timerInterval);
+  setStatus('idle');
+  await releaseWakeLock();
+  renderAll('');
+
+  document.getElementById('btnStart').disabled = false;
+  document.getElementById('btnPause').disabled = true;
+  document.getElementById('btnPause').textContent = '一時停止';
+  document.getElementById('btnStop').disabled  = true;
+}
+
+function clearAll() {
+  if (isRecording) stopRecording();
+  segments = []; finalBuffer = ''; elapsed = 0;
+  clearInterval(timerInterval);
+  document.getElementById('timer').textContent = '00:00:00';
+  renderAll('');
+}
+
+// ── 出力 ───────────────────────────────────────────
+function getFullText() {
+  return segments.map(s => `[${s.time}] ${s.text}`).join('\n\n');
+}
+
+function copyAll() {
+  if (!segments.length) { showError('文字起こしデータがありません'); return; }
+  navigator.clipboard.writeText(getFullText()).then(() => showToast('コピーしました'));
+}
+
+function exportText() {
+  if (!segments.length) { showError('文字起こしデータがありません'); return; }
+  const header = `現場文字起こし — ${new Date().toLocaleString('ja-JP')}\n${'='.repeat(40)}\n\n`;
+  const blob = new Blob([header + getFullText()], { type: 'text/plain;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `transcript_${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.txt`;
+  a.click();
+}
+
+// ── 初期化 ─────────────────────────────────────────
+initDict();
+</script>
+</body>
+</html>
