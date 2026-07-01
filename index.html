@@ -465,6 +465,8 @@ function startTimer() {
 }
 
 // ── 音声認識 ───────────────────────────────────────
+let lastFinalizedIndex = 0; // このインデックスより前の確定結果は処理済み
+
 function setupRecognition() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) { showError('音声認識に対応していません。Chrome を使用してください。'); return null; }
@@ -475,12 +477,25 @@ function setupRecognition() {
   r.interimResults = true;
   r.maxAlternatives = 1;
 
+  r.onstart = () => {
+    // 新しいセッション開始時は確定済みインデックスをリセット
+    // (Android Chromeでは再起動のたびにresults配列が0から再カウントされるため)
+    lastFinalizedIndex = 0;
+  };
+
   r.onresult = (e) => {
     if (isPaused) return;
     let interim = '';
     for (let i = e.resultIndex; i < e.results.length; i++) {
-      if (e.results[i].isFinal) finalBuffer += e.results[i][0].transcript;
-      else interim += e.results[i][0].transcript;
+      if (e.results[i].isFinal) {
+        // すでに処理済みのインデックスは無視する（重複防止）
+        if (i >= lastFinalizedIndex) {
+          finalBuffer += e.results[i][0].transcript;
+          lastFinalizedIndex = i + 1;
+        }
+      } else {
+        interim += e.results[i][0].transcript;
+      }
     }
     if (finalBuffer.length >= 150) flushBuffer();
     renderAll(finalBuffer + interim);
