@@ -260,13 +260,15 @@
     <div class="timer" id="timer">00:00:00</div>
     <div style="flex:1"></div>
     <button class="sm" onclick="copyAll()">コピー</button>
-    <button class="sm" onclick="exportText()">保存</button>
+    <button class="sm" onclick="exportText()">テキスト保存</button>
+    <button class="sm" id="btnAudioSave" onclick="downloadAudio()" disabled>音声保存</button>
     <button class="sm danger" onclick="clearAll()">クリア</button>
   </div>
 
   <div class="info-bar">
     <span>セグメント: <strong id="segCount">0</strong></span>
     <span>文字数: <strong id="charCount">0</strong></span>
+    <span>音声: <strong id="audioSize">未録音</strong></span>
     <span class="wakelock-badge" id="wakeLockBadge">画面: 通常</span>
   </div>
 
@@ -324,6 +326,13 @@ let segments = [];
 let finalBuffer = "";
 let wakeLock = null;
 let deferredInstallPrompt = null;
+
+// ── 音声録音の状態 ──────────────────────────────────
+let mediaRecorder = null;
+let micStream = null;
+let audioChunks = [];
+let audioBlob = null;
+const AUDIO_BITRATE = 24000; // 24kbps: 会話の聞き取りに十分な品質で長時間でも軽量
 
 // ── PWAインストール ────────────────────────────────
 window.addEventListener('beforeinstallprompt', (e) => {
@@ -515,6 +524,60 @@ function setupRecognition() {
   return r;
 }
 
+// ── 音声録音 ───────────────────────────────────────
+async function setupAudioRecording() {
+  try {
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (e) {
+    showError('マイクへのアクセスが拒否されたため、音声保存は無効です（文字起こしは続行します）');
+    return null;
+  }
+
+  const candidates = [
+    'audio/webm;codecs=opus',
+    'audio/webm',
+    'audio/mp4'
+  ];
+  const mimeType = candidates.find(t => MediaRecorder.isTypeSupported(t)) || '';
+
+  const recorder = new MediaRecorder(micStream, {
+    mimeType: mimeType || undefined,
+    audioBitsPerSecond: AUDIO_BITRATE
+  });
+
+  audioChunks = [];
+  recorder.ondataavailable = (e) => {
+    if (e.data && e.data.size > 0) {
+      audioChunks.push(e.data);
+      updateAudioSizeDisplay();
+    }
+  };
+
+  return recorder;
+}
+
+function updateAudioSizeDisplay() {
+  const bytes = audioChunks.reduce((n, c) => n + c.size, 0);
+  const mb = (bytes / (1024 * 1024)).toFixed(1);
+  document.getElementById('audioSize').textContent = `${mb} MB (録音中)`;
+}
+
+function stopAudioTracks() {
+  if (micStream) {
+    micStream.getTracks().forEach(t => t.stop());
+    micStream = null;
+  }
+}
+
+function downloadAudio() {
+  if (!audioBlob) { showError('音声データがありません'); return; }
+  const ext = audioBlob.type.includes('mp4') ? 'm4a' : 'webm';
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(audioBlob);
+  a.download = `recording_${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.${ext}`;
+  a.click();
+}
+
 // ── 録音操作 ───────────────────────────────────────
 async function startRecording() {
   recognition = setupRecognition();
@@ -522,11 +585,21 @@ async function startRecording() {
 
   isRecording = true; isPaused = false;
   elapsed = 0; finalBuffer = '';
+  audioBlob = null;
+  document.getElementById('btnAudioSave').disabled = true;
+  document.getElementById('audioSize').textContent = '準備中…';
 
   try { recognition.start(); } catch (_) {}
   setStatus('rec');
   startTimer();
   await requestWakeLock();
+
+  mediaRecorder = await setupAudioRecording();
+  if (mediaRecorder) {
+    mediaRecorder.start(1000); // 1秒ごとにチャンク保存（メモリ安定化）
+  } else {
+    document.getElementById('audioSize').textContent = '録音不可';
+  }
 
   document.getElementById('btnStart').disabled = true;
   document.getElementById('btnPause').disabled = false;
@@ -539,11 +612,13 @@ function togglePause() {
   if (isPaused) {
     flushBuffer();
     try { recognition.stop(); } catch (_) {}
+    if (mediaRecorder && mediaRecorder.state === 'recording') mediaRecorder.pause();
     setStatus('paused');
     releaseWakeLock();
     document.getElementById('btnPause').textContent = '再開';
   } else {
     try { recognition.start(); } catch (_) {}
+    if (mediaRecorder && mediaRecorder.state === 'paused') mediaRecorder.resume();
     setStatus('rec');
     requestWakeLock();
     document.getElementById('btnPause').textContent = '一時停止';
@@ -559,6 +634,19 @@ async function stopRecording() {
   await releaseWakeLock();
   renderAll('');
 
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    await new Promise((resolve) => {
+      mediaRecorder.onstop = resolve;
+      mediaRecorder.stop();
+    });
+    audioBlob = new Blob(audioChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
+    const mb = (audioBlob.size / (1024 * 1024)).toFixed(1);
+    document.getElementById('audioSize').textContent = `${mb} MB`;
+    document.getElementById('btnAudioSave').disabled = false;
+  }
+  stopAudioTracks();
+  mediaRecorder = null;
+
   document.getElementById('btnStart').disabled = false;
   document.getElementById('btnPause').disabled = true;
   document.getElementById('btnPause').textContent = '一時停止';
@@ -568,8 +656,11 @@ async function stopRecording() {
 function clearAll() {
   if (isRecording) stopRecording();
   segments = []; finalBuffer = ''; elapsed = 0;
+  audioChunks = []; audioBlob = null;
   clearInterval(timerInterval);
   document.getElementById('timer').textContent = '00:00:00';
+  document.getElementById('audioSize').textContent = '未録音';
+  document.getElementById('btnAudioSave').disabled = true;
   renderAll('');
 }
 
